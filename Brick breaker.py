@@ -1338,4 +1338,105 @@ class Game:
                 screen.blit(img, (x, HEIGHT - 22))
                 x += img.get_width() + 18
 
-        
+        # Indikator kecepatan (tempo)
+        tempo = self.tempo
+        frac = (tempo - 1) / TEMPO_MAX_BONUS
+        col = (int(110 + 145 * frac), int(235 - 140 * frac), 120)
+        label = FONT_S.render(f"Kecepatan x{tempo:.2f}", True, col)
+        screen.blit(label, (WIDTH - label.get_width() - 10, HEIGHT - 34))
+        bar = pygame.Rect(WIDTH - 110, HEIGHT - 12, 100, 6)
+        pygame.draw.rect(screen, (50, 54, 85), bar, border_radius=3)
+        pygame.draw.rect(screen, col, (bar.x, bar.y, int(bar.w * frac), bar.h),
+                         border_radius=3)
+
+    def draw_select(self):
+        self.draw_background(screen)
+        draw_text(screen, "PILIH KARAKTER", FONT_L, WHITE, (WIDTH // 2, 50))
+        draw_text(screen, "Setiap hewan punya kelebihan & kekurangan",
+                  FONT_S, (170, 175, 205), (WIDTH // 2, 84))
+
+        for i, ch in enumerate(CHARACTERS):
+            sel = i == self.char_index
+            r = self.card_rects[i].move(0, -12 if sel else 0)
+            panel = pygame.Surface(r.size, pygame.SRCALPHA)
+            pygame.draw.rect(panel, (10, 10, 40, 215 if sel else 140),
+                             panel.get_rect(), border_radius=16)
+            screen.blit(panel, r.topleft)
+            pygame.draw.rect(screen, ch["color"] if sel else (70, 75, 110), r,
+                             width=3 if sel else 2, border_radius=16)
+
+            # Hewan besar + pratinjau paddle (lebarnya sesuai karakter)
+            draw_animal(screen, ch["animal"], r.centerx, r.y + 78, 38)
+            prev = pygame.Rect(0, 0, int(ch["width"] * 1.1), 20)
+            prev.center = (r.centerx, r.y + 140)
+            draw_paddle_shape(screen, prev, ch["color"])
+
+            draw_text(screen, ch["name"], FONT_L, ch["color"],
+                      (r.centerx, r.y + 182))
+            for j, line in enumerate(ch["desc"]):
+                draw_text(screen, line, FONT_S, (200, 205, 230),
+                          (r.centerx, r.y + 214 + j * 20), shadow=False)
+
+            for j, (label, val) in enumerate(zip(STAT_LABELS, ch["stats"])):
+                y = r.y + 268 + j * 22
+                lab = FONT_S.render(label, True, (170, 175, 205))
+                screen.blit(lab, (r.x + 20, y - lab.get_height() // 2))
+                for k in range(5):
+                    seg = pygame.Rect(r.x + 90 + k * 24, y - 5, 20, 10)
+                    col = ch["color"] if k < val else (50, 54, 85)
+                    pygame.draw.rect(screen, col, seg, border_radius=3)
+
+        draw_text(screen, "KIRI/KANAN atau A/D: pilih   |   SPASI / ENTER / klik: mulai",
+                  FONT_S, WHITE, (WIDTH // 2, HEIGHT - 40))
+
+    def draw_hud(self, surf):
+        bar = pygame.Surface((WIDTH, HUD_H), pygame.SRCALPHA)
+        bar.fill((0, 0, 0, 120))
+        surf.blit(bar, (0, 0))
+        pygame.draw.line(surf, self.char["color"], (0, HUD_H), (WIDTH, HUD_H), 2)
+
+        score = FONT_M.render(f"Skor  {self.score}", True, WHITE)
+        surf.blit(score, (16, HUD_H // 2 - score.get_height() // 2))
+        draw_animal(surf, self.char["animal"], 190, HUD_H // 2 + 2, 10)
+        name = FONT_S.render(self.char["name"], True, self.char["color"])
+        surf.blit(name, (206, HUD_H // 2 - name.get_height() // 2))
+
+        label = f"Level {self.level}" + ("  BOSS" if self.boss else "")
+        draw_text(surf, label, FONT_M, (255, 120, 120) if self.boss else YELLOW,
+                  (WIDTH // 2 + 40, HUD_H // 2))
+        best = FONT_S.render(f"Terbaik {self.highscore}", True, (170, 175, 205))
+        surf.blit(best, best.get_rect(center=(WIDTH // 2 + 190, HUD_H // 2)))
+
+        if self.combo >= 2:
+            draw_text(surf, f"Combo x{min(self.combo, 5)}", FONT_S, PINK,
+                      (WIDTH // 2 + 290, HUD_H // 2))
+
+        for i in range(self.lives):
+            draw_heart(surf, WIDTH - 16 - i * 22, HUD_H // 2, 16, PINK)
+
+    def draw_overlay(self, title, subtitle, lines=()):
+        shade = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        shade.fill((5, 5, 20, 175))
+        screen.blit(shade, (0, 0))
+        draw_text(screen, title, FONT_XL, CYAN, (WIDTH // 2, HEIGHT // 2 - 90))
+        draw_text(screen, subtitle, FONT_M, WHITE, (WIDTH // 2, HEIGHT // 2 - 20))
+        for i, line in enumerate(lines):
+            draw_text(screen, line, FONT_S, (190, 195, 225),
+                      (WIDTH // 2, HEIGHT // 2 + 30 + i * 28))
+
+
+def main():
+    game = Game()
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if not game.handle_event(event):
+                running = False
+        game.update()
+        game.draw()
+        clock.tick(FPS)
+
+
+if __name__ == "__main__":
+    main()
+    pygame.quit()
