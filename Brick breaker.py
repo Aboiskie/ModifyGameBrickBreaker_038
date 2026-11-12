@@ -707,3 +707,174 @@ class Boss:
                   (x - 45, y + bh // 2))
 
 
+# ----------------------------------------------------------------------
+# Game manager
+# ----------------------------------------------------------------------
+class Game:
+    def __init__(self):
+        self.bgs = [make_background(t, b) for t, b in THEMES + [BOSS_THEME]]
+        self.world = pygame.Surface((WIDTH, HEIGHT))
+        self.stars = [[random.uniform(0, WIDTH), random.uniform(0, HEIGHT),
+                       random.uniform(0.1, 0.5), random.randint(1, 2)]
+                      for _ in range(70)]
+        self.highscore = load_highscore()
+        self.char_index = 0
+        cw, chh, gap = 220, 360, 30
+        x0 = (WIDTH - (3 * cw + 2 * gap)) // 2
+        self.card_rects = [pygame.Rect(x0 + i * (cw + gap), 112, cw, chh)
+                           for i in range(len(CHARACTERS))]
+        # state: start, select, playing, paused, bossintro, levelclear, gameover
+        self.state = "start"
+        self.reset_game()
+
+    @property
+    def char(self):
+        return CHARACTERS[self.char_index]
+
+    @property
+    def tempo(self):
+        """Pengali kecepatan; naik pelan-pelan selama bola terbang."""
+        bonus = self.play_time / FPS / TEMPO_FULL_SECONDS * TEMPO_MAX_BONUS
+        return 1.0 + min(TEMPO_MAX_BONUS, bonus)
+
+    # ---------------- setup ----------------
+    def reset_game(self):
+        self.score = 0
+        self.lives = self.char["lives"]
+        self.level = 1
+        self.combo = 0
+        self.shake = 0
+        self.level_timer = 0
+        self.intro_timer = 0
+        self.hurt_timer = 0
+        self.play_time = 0.0
+        self.laser_cd = 0
+        self.clear_msg = ""
+        self.paddle = Paddle(self.char)
+        self.ball = Ball()
+        self.boss = None
+        self.bullets = []
+        self.lasers = []
+        self.particles, self.texts, self.powerups = [], [], []
+        self.build_level()
+
+    def build_level(self):
+        self.bricks = []
+        self.bullets = []
+        self.lasers = []
+        self.boss = None
+        is_boss = self.level % BOSS_EVERY == 0
+
+        cols, gap, bw, bh = 10, 6, 67, 22
+        total_w = cols * bw + (cols - 1) * gap
+        start_x = (WIDTH - total_w) // 2
+
+        if is_boss:
+            self.boss = Boss(self.level // BOSS_EVERY)
+            rows, start_y = 2, HUD_H + 150
+            pattern = lambda r, c, R_, C: random.random() < 0.6
+        else:
+            rows = min(5 + self.level // 2, 8)
+            start_y = HUD_H + 40
+            n = self.level - self.level // BOSS_EVERY - 1  # urutan level non-boss
+            pattern = PATTERNS[n % len(PATTERNS)]
+
+        strong_chance = min(0.08 + 0.07 * self.level, 0.5)
+        bomb_chance = 0.06 if self.level >= 2 else 0.0
+
+        for row in range(rows):
+            for col in range(cols):
+                if not pattern(row, col, rows, cols):
+                    continue
+                x = start_x + col * (bw + gap)
+                y = start_y + row * (bh + gap)
+                color = ROW_COLORS[row % len(ROW_COLORS)]
+                roll = random.random()
+                if roll < bomb_chance:
+                    brick = Brick(x, y, bw, bh, color, 1, "bomb")
+                elif roll < bomb_chance + strong_chance:
+                    brick = Brick(x, y, bw, bh, color, 2)
+                else:
+                    brick = Brick(x, y, bw, bh, color, 1)
+                self.bricks.append(brick)
+
+        speed = min(6.0 + 0.5 * (self.level - 1), 10.0)
+        self.ball.base_speed = speed * self.char["ball"]
+        self.ball.slow_timer = 0
+        self.ball.fire_timer = 0
+        self.powerups.clear()
+        self.paddle.target_w = self.paddle.base_w
+        self.paddle.wide_timer = 0
+        self.paddle.laser_timer = 0
+        self.ball.stick_to(self.paddle)
+        self.combo = 0
+
+    def begin_level(self):
+        self.build_level()
+        if self.boss:
+            self.state = "bossintro"
+            self.intro_timer = 150
+            sfx.play("warn")
+        else:
+            self.state = "playing"
+
+    # ---------------- input ----------------
+    def handle_event(self, event):
+        if event.type == pygame.QUIT:
+            return False
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                return False
+            if event.key == pygame.K_m:
+                sfx.toggle()
+            elif event.key == pygame.K_p and self.state in ("playing", "paused"):
+                self.state = "paused" if self.state == "playing" else "playing"
+                sfx.play("select")
+            elif event.key in (pygame.K_SPACE, pygame.K_RETURN):
+                self.action()
+            elif event.key == pygame.K_c and self.state == "gameover":
+                self.state = "select"
+                sfx.play("select")
+            elif event.key == pygame.K_n and self.state == "playing":
+                # Pintasan demo: lompat ke level berikutnya (untuk uji boss)
+                self.level += 1
+                self.begin_level()
+            elif self.state == "select":
+                if event.key in (pygame.K_LEFT, pygame.K_a):
+                    self.char_index = (self.char_index - 1) % len(CHARACTERS)
+                    sfx.play("select")
+                elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                    self.char_index = (self.char_index + 1) % len(CHARACTERS)
+                    sfx.play("select")
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.state == "select":
+                for i, rect in enumerate(self.card_rects):
+                    if rect.collidepoint(event.pos):
+                        if i == self.char_index:
+                            self.action()
+                        else:
+                            self.char_index = i
+                            sfx.play("select")
+            else:
+                self.action()
+        if event.type == pygame.MOUSEMOTION and \
+                self.state in ("playing", "bossintro"):
+            self.paddle.set_center(event.pos[0])
+        return True
+
+    def action(self):
+        if self.state == "start":
+            self.state = "select"
+            sfx.play("confirm")
+        elif self.state in ("select", "gameover"):
+            self.reset_game()
+            self.state = "playing"
+            sfx.play("confirm")
+        elif self.state == "paused":
+            self.state = "playing"
+        elif self.state == "playing" and self.ball.stuck:
+            self.ball.launch()
+            sfx.play("launch")
+
+    
