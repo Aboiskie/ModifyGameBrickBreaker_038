@@ -877,4 +877,134 @@ class Game:
             self.ball.launch()
             sfx.play("launch")
 
-    
+    # ---------------- update ----------------
+    def update(self):
+        tempo = self.tempo
+        for s in self.stars:                      # bintang ikut makin cepat
+            s[1] += s[2] * tempo
+            if s[1] > HEIGHT:
+                s[0], s[1] = random.uniform(0, WIDTH), 0
+        for p in self.particles:
+            p.update()
+        for t in self.texts:
+            t.update()
+        self.particles = [p for p in self.particles if p.life > 0]
+        self.texts = [t for t in self.texts if t.life > 0]
+        if self.shake > 0:
+            self.shake -= 1
+
+        if self.state == "levelclear":
+            self.level_timer -= 1
+            if self.level_timer <= 0:
+                self.level += 1
+                self.begin_level()
+            return
+
+        if self.state not in ("playing", "bossintro"):
+            return
+
+        keys = pygame.key.get_pressed()
+        direction = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - \
+                    (keys[pygame.K_LEFT] or keys[pygame.K_a])
+        self.paddle.move(direction, tempo)
+        self.paddle.update()
+        if self.hurt_timer > 0:
+            self.hurt_timer -= 1
+
+        ball = self.ball
+        if ball.slow_timer > 0:
+            ball.slow_timer -= 1
+        if ball.fire_timer > 0:
+            ball.fire_timer -= 1
+        if ball.stuck:
+            ball.x = self.paddle.x + self.paddle.w / 2
+            ball.y = self.paddle.y - ball.r - 1
+
+        if self.state == "bossintro":
+            self.intro_timer -= 1
+            if self.boss:
+                self.boss.enter_step()
+            if self.intro_timer <= 0:
+                self.state = "playing"
+            return
+
+        if not ball.stuck:
+            self.play_time += 1
+            ball.normalize(tempo)
+            ball.trail.append((ball.x, ball.y))
+            if len(ball.trail) > 12:
+                ball.trail.pop(0)
+            steps = max(3, int(math.hypot(ball.vx, ball.vy) // 4) + 1)
+            for _ in range(steps):  # sub-step supaya tidak tembus objek
+                self.step_ball(1 / steps)
+                if ball.stuck or self.state != "playing":
+                    break
+        if self.state != "playing":
+            return
+
+        self.update_powerups(tempo)
+        self.update_lasers()
+        if self.state != "playing":
+            return
+
+        if self.boss and self.boss.ready:
+            new_bullets = self.boss.update(self.paddle, tempo)
+            if new_bullets:
+                self.bullets.extend(new_bullets)
+                sfx.play("boss_shoot")
+        self.update_bullets()
+        if self.state != "playing":
+            return
+
+        if not self.bricks and self.boss is None:
+            self.clear_level(f"LEVEL {self.level} SELESAI!", 100)
+
+    def add_score(self, points):
+        gained = int(round(points * self.char["score"]))
+        self.score += gained
+        return gained
+
+    def clear_level(self, message, delay):
+        self.state = "levelclear"
+        self.level_timer = delay
+        self.clear_msg = message
+        self.bullets.clear()
+        self.lasers.clear()
+        self.play_time *= 0.75   # jeda napas: kecepatan turun sedikit
+        bonus = self.add_score(100 * self.level)
+        self.texts.append(FloatText(WIDTH // 2, HEIGHT // 2 + 70,
+                                    f"Bonus level +{bonus}", YELLOW))
+        self.check_highscore()
+        sfx.play("win")
+
+    def step_ball(self, f):
+        ball, paddle = self.ball, self.paddle
+        ball.x += ball.vx * f
+        ball.y += ball.vy * f
+
+        # Dinding
+        if ball.x < ball.r:
+            ball.x, ball.vx = ball.r, abs(ball.vx)
+            sfx.play("wall")
+        elif ball.x > WIDTH - ball.r:
+            ball.x, ball.vx = WIDTH - ball.r, -abs(ball.vx)
+            sfx.play("wall")
+        if ball.y < HUD_H + ball.r:
+            ball.y, ball.vy = HUD_H + ball.r, abs(ball.vy)
+            sfx.play("wall")
+
+        # Paddle: sudut pantulan bergantung posisi benturan
+        prect = paddle.rect
+        if ball.vy > 0 and ball.rect.colliderect(prect) \
+                and ball.y < prect.centery:
+            offset = (ball.x - prect.centerx) / (prect.w / 2)
+            offset = max(-1, min(1, offset))
+            angle = math.radians(offset * 62)
+            speed = math.hypot(ball.vx, ball.vy)
+            ball.vx = speed * math.sin(angle)
+            ball.vy = -speed * math.cos(angle)
+            ball.y = prect.top - ball.r
+            self.combo = 0
+            sfx.play("paddle")
+
+        
