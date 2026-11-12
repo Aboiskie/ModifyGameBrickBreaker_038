@@ -1007,4 +1007,335 @@ class Game:
             self.combo = 0
             sfx.play("paddle")
 
+        # Balok (bola api menembus semua balok tanpa memantul)
+        brect = ball.rect
+        if ball.fire_timer > 0:
+            for brick in self.bricks[:]:
+                if brick in self.bricks and brect.colliderect(brick.rect):
+                    self.hit_brick(brick, damage=99)
+        else:
+            for brick in self.bricks:
+                if brect.colliderect(brick.rect):
+                    self.bounce_off(brick.rect)
+                    self.hit_brick(brick)
+                    break
+
+        # Boss
+        boss = self.boss
+        if boss and boss.ready and ball.rect.colliderect(boss.rect):
+            self.bounce_off(boss.rect)
+            self.hit_boss()
+
+        # Bola jatuh
+        if self.state == "playing" and ball.y > HEIGHT + ball.r:
+            self.lose_life()
+
+    def bounce_off(self, rect):
+        ball = self.ball
+        br = ball.rect
+        overlaps = {
+            "left": br.right - rect.left,
+            "right": rect.right - br.left,
+            "top": br.bottom - rect.top,
+            "bottom": rect.bottom - br.top,
+        }
+        side = min(overlaps, key=overlaps.get)
+        if side == "left":
+            ball.vx = -abs(ball.vx)
+            ball.x = rect.left - ball.r
+        elif side == "right":
+            ball.vx = abs(ball.vx)
+            ball.x = rect.right + ball.r
+        elif side == "top":
+            ball.vy = -abs(ball.vy)
+            ball.y = rect.top - ball.r
+        else:
+            ball.vy = abs(ball.vy)
+            ball.y = rect.bottom + ball.r
+
+    def hit_brick(self, brick, damage=1):
+        brick.hp -= damage
+        if brick.hp > 0:
+            cx, cy = brick.rect.center
+            gained = self.add_score(5)
+            self.texts.append(FloatText(cx, cy, f"+{gained}", WHITE))
+            for _ in range(4):
+                self.particles.append(Particle(cx, cy, lighten(brick.color)))
+            sfx.play("hard")
+            return
+        self.destroy_brick(brick)
+
+    def destroy_brick(self, brick, chain=False):
+        if brick not in self.bricks:
+            return
+        self.bricks.remove(brick)
+        cx, cy = brick.rect.center
+
+        if not chain:
+            self.combo += 1
+        gained = self.add_score(10 * min(max(self.combo, 1), 5))
+        self.texts.append(FloatText(cx, cy, f"+{gained}", brick.color))
+        for _ in range(14):
+            self.particles.append(Particle(cx, cy, brick.color))
+
+        if not chain and random.random() < 0.20:
+            kind = random.choices("WSLFZ", weights=[3, 3, 1, 3, 3])[0]
+            self.powerups.append(PowerUp(cx, cy, kind))
+
+        if brick.kind == "bomb":
+            sfx.play("bomb")
+            self.shake = max(self.shake, 8)
+            for _ in range(24):
+                self.particles.append(Particle(cx, cy, random.choice(
+                    [FIRE, YELLOW, WHITE]), power=1.6))
+            for other in self.bricks[:]:   # ledakan menghancurkan balok sekitar
+                ox, oy = other.rect.center
+                if math.hypot(ox - cx, oy - cy) < 100:
+                    self.destroy_brick(other, chain=True)
+        elif not chain:
+            sfx.play("brick")
+        self.check_highscore()
+
+    def hit_boss(self):
+        boss = self.boss
+        if not boss.take_damage():
+            sfx.play("wall")
+            return
+        cx, cy = boss.rect.center
+        gained = self.add_score(20)
+        self.texts.append(FloatText(cx, boss.rect.bottom + 10,
+                                    f"+{gained}", WHITE))
+        for _ in range(8):
+            self.particles.append(Particle(cx, cy, boss.PHASE_COLORS[boss.phase]))
+        self.shake = max(self.shake, 6)
+        self.check_highscore()
+
+        if boss.hp <= 0:
+            self.kill_boss(boss)
+        else:
+            sfx.play("boss_hit")
+
+    def kill_boss(self, boss):
+        cx, cy = boss.rect.center
+        for _ in range(90):
+            self.particles.append(Particle(
+                cx + random.randint(-70, 70), cy + random.randint(-30, 30),
+                random.choice([WHITE, YELLOW, ORANGE, PINK]), power=1.8))
+        for kind in "WZL":
+            self.powerups.append(PowerUp(cx + random.randint(-60, 60), cy, kind))
+        gained = self.add_score(500 * boss.number)
+        self.texts.append(FloatText(cx, cy, f"+{gained}", YELLOW))
+        self.boss = None
+        self.bricks.clear()
+        self.shake = 30
+        sfx.play("boss_die")
+        self.clear_level("BOSS DIKALAHKAN!", 170)
+
+    def lose_life(self):
+        self.lives -= 1
+        self.shake = 18
+        self.combo = 0
+        self.play_time *= 0.7    # kena penalti: kecepatan turun
+        if self.lives <= 0:
+            self.game_over()
+        else:
+            sfx.play("lose")
+            self.ball.stick_to(self.paddle)
+
+    def hurt(self):
+        """Paddle kena peluru boss (bola tidak di-reset)."""
+        if self.hurt_timer > 0:
+            return
+        self.lives -= 1
+        self.hurt_timer = 90
+        self.shake = 15
+        if self.lives <= 0:
+            self.game_over()
+        else:
+            sfx.play("hurt")
+
+    def game_over(self):
+        self.state = "gameover"
+        self.bullets.clear()
+        self.lasers.clear()
+        self.check_highscore()
+        sfx.play("gameover")
+
+    def check_highscore(self):
+        if self.score > self.highscore:
+            self.highscore = self.score
+            save_highscore(self.highscore)
+
+    def update_powerups(self, tempo):
+        prect = self.paddle.rect
+        for pu in self.powerups[:]:
+            pu.update(tempo)
+            if pu.rect.colliderect(prect):
+                self.apply_powerup(pu)
+                self.powerups.remove(pu)
+            elif pu.rect.top > HEIGHT:
+                self.powerups.remove(pu)
+
+    def update_lasers(self):
+        paddle = self.paddle
+        if paddle.laser_timer > 0:
+            self.laser_cd -= 1
+            if self.laser_cd <= 0:
+                self.laser_cd = 18
+                self.lasers.append(Laser(paddle.x + 8, paddle.y - 6))
+                self.lasers.append(Laser(paddle.x + paddle.w - 8, paddle.y - 6))
+                sfx.play("laser")
+
+        for ls in self.lasers[:]:
+            ls.update()
+            if ls.rect.bottom < HUD_H:
+                self.lasers.remove(ls)
+                continue
+            hit = False
+            for brick in self.bricks:
+                if ls.rect.colliderect(brick.rect):
+                    self.hit_brick(brick)
+                    hit = True
+                    break
+            if not hit and self.boss and self.boss.ready \
+                    and ls.rect.colliderect(self.boss.rect):
+                hit = True
+                if self.boss.hit_cd == 0:
+                    self.hit_boss()
+                    if self.state != "playing":
+                        return
+            if hit and ls in self.lasers:
+                self.lasers.remove(ls)
+
+    def update_bullets(self):
+        prect = self.paddle.rect
+        for b in self.bullets[:]:
+            b.update()
+            if b.rect.colliderect(prect):
+                self.bullets.remove(b)
+                self.hurt()
+                if self.state != "playing":
+                    return
+            elif b.y > HEIGHT + 20 or b.x < -20 or b.x > WIDTH + 20:
+                self.bullets.remove(b)
+
+    def apply_powerup(self, pu):
+        name = PowerUp.KINDS[pu.kind][0]
+        power = self.char["power"]
+        if pu.kind == "W":
+            self.paddle.target_w = self.paddle.base_w * 1.6
+            self.paddle.wide_timer = int(FPS * 10 * power)
+        elif pu.kind == "S":
+            self.ball.slow_timer = int(FPS * 8 * power)
+        elif pu.kind == "L":
+            self.lives = min(self.lives + 1, 6)
+        elif pu.kind == "F":
+            self.ball.fire_timer = int(FPS * 6 * power)
+        elif pu.kind == "Z":
+            self.paddle.laser_timer = int(FPS * 8 * power)
+            self.laser_cd = 0
+        sfx.play("powerup")
+        self.texts.append(FloatText(pu.rect.centerx, self.paddle.y - 30,
+                                    name, pu.color))
+
+    # ---------------- gambar ----------------
+    def draw_background(self, surf):
+        idx = len(self.bgs) - 1 if self.boss else (self.level - 1) % len(THEMES)
+        surf.blit(self.bgs[idx], (0, 0))
+        for x, y, _, size in self.stars:
+            c = 90 + size * 50
+            pygame.draw.circle(surf, (c, c, c + 20), (int(x), int(y)), size)
+
+    def draw(self):
+        if self.state == "select":
+            self.draw_select()
+            pygame.display.flip()
+            return
+
+        w = self.world
+        self.draw_background(w)
+
+        for brick in self.bricks:
+            brick.draw(w)
+        if self.boss:
+            self.boss.draw(w, self.paddle)
+            if self.boss.ready:
+                self.boss.draw_bar(w)
+        for pu in self.powerups:
+            pu.draw(w)
+        for ls in self.lasers:
+            ls.draw(w)
+        for b in self.bullets:
+            b.draw(w)
+        for p in self.particles:
+            p.draw(w)
+        if not (self.hurt_timer > 0 and (self.hurt_timer // 4) % 2):
+            self.paddle.draw(w)
+        self.ball.draw(w)
+        for t in self.texts:
+            t.draw(w)
+        self.draw_hud(w)
+
+        ox = oy = 0
+        if self.shake > 0:
+            ox = random.randint(-5, 5)
+            oy = random.randint(-5, 5)
+        screen.fill((0, 0, 0))
+        screen.blit(w, (ox, oy))
+
+        if self.state == "start":
+            self.draw_overlay("BLOCK BREAKER", "Tekan SPASI atau klik untuk mulai",
+                              ["Gerak: panah kiri/kanan, A/D, atau mouse",
+                               "SPASI / klik: luncurkan bola   |   P: jeda   |   M: suara",
+                               "Awas: makin lama bermain, game makin cepat!"])
+        elif self.state == "paused":
+            self.draw_overlay("JEDA", "Tekan P atau SPASI untuk lanjut")
+        elif self.state == "gameover":
+            self.draw_overlay("GAME OVER", "SPASI: main lagi   |   C: ganti karakter",
+                              [f"Skor: {self.score}",
+                               f"Skor tertinggi: {self.highscore}"])
+        elif self.state == "levelclear":
+            draw_text(screen, self.clear_msg, FONT_L, GREEN,
+                      (WIDTH // 2, HEIGHT // 2))
+        elif self.state == "bossintro":
+            pulse = (math.sin(self.intro_timer * 0.25) + 1) / 2
+            tint = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            tint.fill((255, 0, 0, int(25 + 60 * pulse)))
+            screen.blit(tint, (0, 0))
+            draw_text(screen, "!! PERINGATAN !!", FONT_XL, (255, 80, 80),
+                      (WIDTH // 2, HEIGHT // 2 + 40))
+            number = self.boss.number if self.boss else 1
+            draw_text(screen, f"BOSS {number} MENDEKAT", FONT_M, WHITE,
+                      (WIDTH // 2, HEIGHT // 2 + 100))
+        elif self.ball.stuck:
+            draw_text(screen, "Tekan SPASI / klik untuk meluncurkan bola",
+                      FONT_M, WHITE, (WIDTH // 2, HEIGHT // 2 + 120))
+
+        self.draw_footer()
+        pygame.display.flip()
+
+    def draw_footer(self):
+        # Status suara
+        state_txt = "ON" if (sfx.ok and sfx.enabled) else "OFF"
+        tag = FONT_S.render(f"Suara: {state_txt} (M)", True, (150, 155, 185))
+        screen.blit(tag, (10, HEIGHT - 22))
+
+        # Efek power-up yang sedang aktif
+        effects = []
+        if self.ball.fire_timer > 0:
+            effects.append((f"Api {self.ball.fire_timer // FPS + 1}s", FIRE))
+        if self.paddle.laser_timer > 0:
+            effects.append((f"Laser {self.paddle.laser_timer // FPS + 1}s", PURPLE))
+        if self.paddle.wide_timer > 0:
+            effects.append((f"Lebar {self.paddle.wide_timer // FPS + 1}s", CYAN))
+        if self.ball.slow_timer > 0:
+            effects.append((f"Lambat {self.ball.slow_timer // FPS + 1}s", YELLOW))
+        if effects:
+            imgs = [FONT_S.render(t, True, c) for t, c in effects]
+            total = sum(i.get_width() for i in imgs) + 18 * (len(imgs) - 1)
+            x = WIDTH // 2 - total // 2
+            for img in imgs:
+                screen.blit(img, (x, HEIGHT - 22))
+                x += img.get_width() + 18
+
         
