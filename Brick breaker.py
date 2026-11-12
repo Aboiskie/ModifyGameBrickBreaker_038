@@ -189,3 +189,521 @@ class Sfx:
 sfx = Sfx()
 
 
+# ----------------------------------------------------------------------
+# Fungsi bantu
+# ----------------------------------------------------------------------
+def load_highscore():
+    try:
+        with open(HIGHSCORE_FILE, "r") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def save_highscore(value):
+    try:
+        with open(HIGHSCORE_FILE, "w") as f:
+            f.write(str(value))
+    except OSError:
+        pass
+
+
+def make_background(top, bottom):
+    bg = pygame.Surface((WIDTH, HEIGHT))
+    for y in range(HEIGHT):
+        t = y / HEIGHT
+        color = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
+        pygame.draw.line(bg, color, (0, y), (WIDTH, y))
+    return bg
+
+
+def make_glow(radius, color):
+    surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+    for r in range(radius, 0, -1):
+        alpha = int(110 * (1 - r / radius) ** 2)
+        pygame.draw.circle(surf, (*color, alpha), (radius, radius), r)
+    return surf
+
+
+BULLET_GLOW = make_glow(18, (255, 100, 60))
+
+
+def lighten(color, amount=40):
+    return tuple(min(255, c + amount) for c in color)
+
+
+def darken(color, amount=40):
+    return tuple(max(0, c - amount) for c in color)
+
+
+def draw_text(surf, text, font, color, center, shadow=True):
+    if shadow:
+        sh = font.render(text, True, (0, 0, 0))
+        surf.blit(sh, sh.get_rect(center=(center[0] + 2, center[1] + 2)))
+    img = font.render(text, True, color)
+    surf.blit(img, img.get_rect(center=center))
+
+
+def draw_heart(surf, cx, cy, size, color):
+    pts = []
+    for deg in range(0, 360, 10):
+        t = math.radians(deg)
+        x = 16 * math.sin(t) ** 3
+        y = -(13 * math.cos(t) - 5 * math.cos(2 * t)
+              - 2 * math.cos(3 * t) - math.cos(4 * t))
+        pts.append((cx + x * size / 32, cy + y * size / 32))
+    pygame.draw.polygon(surf, color, pts)
+
+
+def R(x, y, w, h):
+    return pygame.Rect(int(x), int(y), max(1, int(w)), max(1, int(h)))
+
+
+def circ(surf, color, x, y, rad):
+    pygame.draw.circle(surf, color, (int(x), int(y)), max(1, int(rad)))
+
+
+def draw_animal(surf, kind, cx, cy, r):
+    """Gambar wajah hewan dari bentuk dasar. r = jari-jari kepala."""
+    lw = max(1, int(r * 0.07))
+    if kind == "cat":
+        fur, dark, pink = (255, 170, 90), (190, 100, 40), (255, 150, 170)
+        for s in (-1, 1):
+            pygame.draw.polygon(surf, fur, [(cx + s * r * 0.95, cy - r * 0.2),
+                                            (cx + s * r * 0.85, cy - r * 1.35),
+                                            (cx + s * r * 0.2, cy - r * 0.75)])
+            pygame.draw.polygon(surf, pink, [(cx + s * r * 0.8, cy - r * 0.35),
+                                             (cx + s * r * 0.75, cy - r * 1.0),
+                                             (cx + s * r * 0.4, cy - r * 0.7)])
+        pygame.draw.ellipse(surf, fur, R(cx - r, cy - r * 0.85, 2 * r, 1.7 * r))
+        for dx in (-0.3, 0, 0.3):
+            pygame.draw.line(surf, dark, (cx + dx * r, cy - r * 0.8),
+                             (cx + dx * r, cy - r * 0.45), lw)
+        for s in (-1, 1):
+            circ(surf, (30, 20, 20), cx + s * r * 0.42, cy - r * 0.05, r * 0.17)
+            circ(surf, WHITE, cx + s * r * 0.46, cy - r * 0.1, r * 0.06)
+            for ey in (0.18, 0.4):
+                pygame.draw.line(surf, (255, 245, 235),
+                                 (cx + s * r * 0.55, cy + r * 0.28),
+                                 (cx + s * r * 1.3, cy + r * ey), 1)
+        pygame.draw.polygon(surf, pink, [(cx - r * 0.12, cy + r * 0.2),
+                                         (cx + r * 0.12, cy + r * 0.2),
+                                         (cx, cy + r * 0.34)])
+        pygame.draw.line(surf, dark, (cx, cy + r * 0.34),
+                         (cx - r * 0.18, cy + r * 0.5), lw)
+        pygame.draw.line(surf, dark, (cx, cy + r * 0.34),
+                         (cx + r * 0.18, cy + r * 0.5), lw)
+
+    elif kind == "capy":
+        brown, light, dark = (165, 115, 75), (198, 150, 108), (70, 45, 30)
+        for s in (-1, 1):
+            circ(surf, (130, 88, 58), cx + s * r * 0.75, cy - r * 0.72, r * 0.26)
+        pygame.draw.ellipse(surf, brown, R(cx - r * 1.05, cy - r * 0.8,
+                                           2.1 * r, 1.65 * r))
+        pygame.draw.ellipse(surf, light, R(cx - r * 0.6, cy - r * 0.05,
+                                           1.2 * r, 0.8 * r))
+        for s in (-1, 1):
+            circ(surf, dark, cx + s * r * 0.55, cy - r * 0.3, r * 0.1)
+            circ(surf, dark, cx + s * r * 0.22, cy + r * 0.28, r * 0.08)
+        # jeruk di kepala (ciri khas capybara)
+        circ(surf, (255, 150, 40), cx + r * 0.1, cy - r * 0.95, r * 0.3)
+        pygame.draw.line(surf, (80, 190, 90), (cx + r * 0.1, cy - r * 1.22),
+                         (cx + r * 0.25, cy - r * 1.35), lw)
+
+    elif kind == "hedgehog":
+        spike, body = (85, 60, 48), (140, 100, 72)
+        beige = (245, 215, 175)
+        for a in range(170, 371, 14):
+            rad, half = math.radians(a), math.radians(9)
+            pygame.draw.polygon(surf, spike, [
+                (cx + math.cos(rad - half) * r * 0.95,
+                 cy + math.sin(rad - half) * r * 0.95),
+                (cx + math.cos(rad) * r * 1.5, cy + math.sin(rad) * r * 1.5),
+                (cx + math.cos(rad + half) * r * 0.95,
+                 cy + math.sin(rad + half) * r * 0.95)])
+        circ(surf, body, cx, cy, r)
+        for s in (-1, 1):
+            circ(surf, (110, 78, 56), cx + s * r * 0.8, cy - r * 0.4, r * 0.22)
+        pygame.draw.ellipse(surf, beige, R(cx - r * 0.78, cy - r * 0.2,
+                                           1.56 * r, 1.05 * r))
+        for s in (-1, 1):
+            circ(surf, (30, 20, 20), cx + s * r * 0.35, cy + r * 0.08, r * 0.1)
+        circ(surf, (20, 15, 15), cx, cy + r * 0.42, r * 0.14)
+
+
+def draw_paddle_shape(surf, rect, color):
+    """Dipakai oleh paddle di game dan pratinjau di menu karakter."""
+    pygame.draw.rect(surf, darken(color, 40), rect, border_radius=10)
+    top = pygame.Rect(rect.x + 3, rect.y + 2, rect.w - 6, rect.h // 2 - 1)
+    pygame.draw.rect(surf, lighten(color, 50), top, border_radius=7)
+
+
+# ----------------------------------------------------------------------
+# Objek game
+# ----------------------------------------------------------------------
+class Paddle:
+    def __init__(self, char):
+        self.kind = char["animal"]
+        self.base_w = float(char["width"])
+        self.w = self.base_w
+        self.target_w = self.base_w
+        self.speed = char["speed"]
+        self.color = char["color"]
+        self.h = 20
+        self.x = WIDTH / 2 - self.w / 2
+        self.y = HEIGHT - 50
+        self.wide_timer = 0
+        self.laser_timer = 0
+
+    @property
+    def rect(self):
+        return pygame.Rect(int(self.x), int(self.y), int(self.w), self.h)
+
+    def set_center(self, cx):
+        self.x = cx - self.w / 2
+        self.clamp()
+
+    def move(self, direction, tempo=1.0):
+        self.x += direction * self.speed * (1 + (tempo - 1) * 0.6)
+        self.clamp()
+
+    def clamp(self):
+        self.x = max(0, min(WIDTH - self.w, self.x))
+
+    def update(self):
+        center = self.x + self.w / 2
+        self.w += (self.target_w - self.w) * 0.15
+        self.x = center - self.w / 2
+        self.clamp()
+        if self.wide_timer > 0:
+            self.wide_timer -= 1
+            if self.wide_timer == 0:
+                self.target_w = self.base_w
+        if self.laser_timer > 0:
+            self.laser_timer -= 1
+
+    def draw(self, surf):
+        r = self.rect
+        glow_col = PURPLE if self.laser_timer > 0 else self.color
+        glow = pygame.Surface((r.w + 40, r.h + 40), pygame.SRCALPHA)
+        pygame.draw.rect(glow, (*glow_col, 55), glow.get_rect(),
+                         border_radius=22)
+        surf.blit(glow, (r.x - 20, r.y - 20))
+        draw_paddle_shape(surf, r, self.color)
+        # Wajah hewan di tengah paddle
+        draw_animal(surf, self.kind, r.centerx, r.centery - 1, 10)
+        if self.laser_timer > 0:  # moncong laser di kedua ujung
+            for x in (r.x + 8, r.right - 8):
+                pygame.draw.rect(surf, PURPLE, (x - 2, r.y - 5, 4, 6))
+
+
+class Ball:
+    def __init__(self):
+        self.r = 8
+        self.x = WIDTH / 2
+        self.y = HEIGHT / 2
+        self.vx = 0.0
+        self.vy = 0.0
+        self.base_speed = 6.0
+        self.stuck = True
+        self.slow_timer = 0
+        self.fire_timer = 0
+        self.trail = []
+        self.glow = make_glow(26, WHITE)
+        self.glow_fire = make_glow(30, FIRE)
+
+    @property
+    def rect(self):
+        return pygame.Rect(int(self.x - self.r), int(self.y - self.r),
+                           self.r * 2, self.r * 2)
+
+    def stick_to(self, paddle):
+        self.stuck = True
+        self.vx = self.vy = 0.0
+        self.x = paddle.x + paddle.w / 2
+        self.y = paddle.y - self.r - 1
+        self.trail.clear()
+
+    def launch(self):
+        angle = math.radians(random.uniform(-25, 25))
+        self.vx = self.base_speed * math.sin(angle)
+        self.vy = -self.base_speed * math.cos(angle)
+        self.stuck = False
+
+    def normalize(self, tempo):
+        """Jaga kecepatan sesuai tempo & hindari pantulan terlalu horizontal."""
+        target = min(MAX_BALL_SPEED, self.base_speed * tempo)
+        if self.slow_timer > 0:
+            target *= 0.7
+        min_vy = target * 0.25
+        if abs(self.vy) < min_vy:
+            self.vy = min_vy if self.vy >= 0 else -min_vy
+        mag = math.hypot(self.vx, self.vy) or 1.0
+        self.vx *= target / mag
+        self.vy *= target / mag
+
+    def draw(self, surf):
+        fire = self.fire_timer > 0
+        base_col = FIRE if fire else CYAN
+        for i, (tx, ty) in enumerate(self.trail):
+            frac = (i + 1) / max(1, len(self.trail))
+            rad = max(1, int(self.r * frac * 0.8))
+            col = tuple(int(c * (0.25 + 0.5 * frac)) for c in base_col)
+            pygame.draw.circle(surf, col, (int(tx), int(ty)), rad)
+        if fire:
+            surf.blit(self.glow_fire, (self.x - 30, self.y - 30))
+        else:
+            surf.blit(self.glow, (self.x - 26, self.y - 26))
+        pygame.draw.circle(surf, (255, 210, 120) if fire else WHITE,
+                           (int(self.x), int(self.y)), self.r)
+        pygame.draw.circle(surf, (255, 255, 255),
+                           (int(self.x - 2), int(self.y - 2)), 3)
+
+
+class Brick:
+    def __init__(self, x, y, w, h, color, hp, kind="normal"):
+        self.rect = pygame.Rect(x, y, w, h)
+        self.color = color
+        self.hp = hp
+        self.max_hp = hp
+        self.kind = kind  # normal / bomb
+
+    def draw(self, surf):
+        r = self.rect
+        strong = self.hp > 1
+        if self.kind == "bomb":
+            body = (235, 80, 60)
+        else:
+            body = (185, 190, 215) if strong else self.color
+        pygame.draw.rect(surf, darken(body, 50), r.move(0, 3), border_radius=6)
+        pygame.draw.rect(surf, body, r, border_radius=6)
+        shine = pygame.Rect(r.x + 3, r.y + 3, r.w - 6, r.h // 3)
+        pygame.draw.rect(surf, lighten(body, 45), shine, border_radius=4)
+        if strong:
+            pygame.draw.rect(surf, self.color, r, width=3, border_radius=6)
+        if self.kind == "bomb":
+            pygame.draw.rect(surf, YELLOW, r, width=2, border_radius=6)
+            circ(surf, (40, 20, 20), r.centerx, r.centery + 1, 6)
+            circ(surf, YELLOW, r.centerx + 3, r.centery - 5, 2)
+
+
+class Particle:
+    def __init__(self, x, y, color, power=1.0):
+        ang = random.uniform(0, math.tau)
+        sp = random.uniform(1.0, 5.0) * power
+        self.x, self.y = x, y
+        self.vx, self.vy = math.cos(ang) * sp, math.sin(ang) * sp - 1
+        self.life = self.max_life = random.randint(22, 42)
+        self.size = random.uniform(2, 5) * (1 + 0.4 * (power - 1))
+        self.color = color
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += 0.15
+        self.life -= 1
+
+    def draw(self, surf):
+        rad = max(1, int(self.size * self.life / self.max_life))
+        pygame.draw.circle(surf, self.color, (int(self.x), int(self.y)), rad)
+
+
+class FloatText:
+    def __init__(self, x, y, text, color):
+        self.x, self.y, self.text, self.color = x, y, text, color
+        self.life = 40
+
+    def update(self):
+        self.y -= 1
+        self.life -= 1
+
+    def draw(self, surf):
+        draw_text(surf, self.text, FONT_S, self.color, (self.x, self.y))
+
+
+class PowerUp:
+    KINDS = {
+        "W": ("Paddle Lebar", CYAN),
+        "S": ("Bola Lambat", YELLOW),
+        "L": ("Nyawa +1", PINK),
+        "F": ("Bola Api!", FIRE),
+        "Z": ("Laser!", PURPLE),
+    }
+
+    def __init__(self, x, y, kind):
+        self.kind = kind
+        self.color = self.KINDS[kind][1]
+        self.rect = pygame.Rect(0, 0, 34, 20)
+        self.rect.center = (x, y)
+        self.fy = float(self.rect.y)
+
+    def update(self, tempo=1.0):
+        self.fy += 3 * (1 + (tempo - 1) * 0.5)
+        self.rect.y = int(self.fy)
+
+    def draw(self, surf):
+        pygame.draw.rect(surf, darken(self.color, 70), self.rect.move(0, 2),
+                         border_radius=10)
+        pygame.draw.rect(surf, self.color, self.rect, border_radius=10)
+        pygame.draw.rect(surf, WHITE, self.rect, width=2, border_radius=10)
+        label = FONT_S.render(self.kind, True, (20, 20, 40))
+        surf.blit(label, label.get_rect(center=self.rect.center))
+
+
+class Laser:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(int(x) - 2, int(y), 4, 14)
+
+    def update(self):
+        self.rect.y -= 12
+
+    def draw(self, surf):
+        pygame.draw.rect(surf, (230, 210, 255), self.rect, border_radius=2)
+        pygame.draw.rect(surf, PURPLE, self.rect, width=1, border_radius=2)
+
+
+# ----------------------------------------------------------------------
+# Boss
+# ----------------------------------------------------------------------
+class BossBullet:
+    r = 7
+
+    def __init__(self, x, y, vx, vy):
+        self.x, self.y, self.vx, self.vy = x, y, vx, vy
+
+    @property
+    def rect(self):
+        return pygame.Rect(int(self.x - self.r), int(self.y - self.r),
+                           self.r * 2, self.r * 2)
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+
+    def draw(self, surf):
+        surf.blit(BULLET_GLOW, (self.x - 18, self.y - 18))
+        pygame.draw.circle(surf, (255, 120, 70), (int(self.x), int(self.y)),
+                           self.r)
+        pygame.draw.circle(surf, (255, 240, 200), (int(self.x), int(self.y)),
+                           self.r - 3)
+
+
+class Boss:
+    PHASE_COLORS = {1: (150, 80, 220), 2: (240, 150, 60), 3: (240, 70, 80)}
+    SHOOT_DELAY = {1: 110, 2: 85, 3: 65}
+
+    def __init__(self, number):
+        self.number = number
+        self.w, self.h = 170, 80
+        self.max_hp = 25 + 12 * number
+        self.hp = self.max_hp
+        self.x = WIDTH / 2 - self.w / 2
+        self.target_y = HUD_H + 40
+        self.y = float(-self.h - 10)
+        self.dir = random.choice((-1, 1))
+        self.shoot_timer = 100.0
+        self.hit_cd = 0      # jeda agar 1 benturan tidak dihitung berkali-kali
+        self.flash = 0
+
+    @property
+    def rect(self):
+        return pygame.Rect(int(self.x), int(self.y), self.w, self.h)
+
+    @property
+    def ready(self):
+        return self.y >= self.target_y
+
+    @property
+    def phase(self):
+        ratio = self.hp / self.max_hp
+        return 1 if ratio > 0.66 else (2 if ratio > 0.33 else 3)
+
+    def enter_step(self):
+        self.y = min(self.target_y, self.y + 3)
+
+    def take_damage(self):
+        """Return True jika kena damage (bukan saat cooldown)."""
+        if self.hit_cd > 0:
+            return False
+        self.hp -= 1
+        self.hit_cd = 8
+        self.flash = 8
+        return True
+
+    def update(self, paddle, tempo=1.0):
+        if self.hit_cd > 0:
+            self.hit_cd -= 1
+        if self.flash > 0:
+            self.flash -= 1
+
+        speed = (1.8 + self.phase * 0.8 + self.number * 0.2) \
+            * (1 + (tempo - 1) * 0.7)
+        self.x += self.dir * speed
+        if self.x <= 10:
+            self.x, self.dir = 10, 1
+        elif self.x + self.w >= WIDTH - 10:
+            self.x, self.dir = WIDTH - 10 - self.w, -1
+        if self.phase == 3 and random.random() < 0.008:
+            self.dir *= -1
+
+        self.shoot_timer -= tempo
+        if self.shoot_timer <= 0:
+            self.shoot_timer = self.SHOOT_DELAY[self.phase]
+            return self.shoot(paddle, tempo)
+        return []
+
+    def shoot(self, paddle, tempo=1.0):
+        sx, sy = self.x + self.w / 2, self.y + self.h - 5
+        base = math.atan2(paddle.y - sy, paddle.x + paddle.w / 2 - sx)
+        speed = (4.2 + 0.25 * self.number + 0.4 * (self.phase - 1)) \
+            * (1 + (tempo - 1) * 0.5)
+        offsets = {1: [0], 2: [-0.3, 0, 0.3],
+                   3: [-0.5, -0.25, 0, 0.25, 0.5]}[self.phase]
+        return [BossBullet(sx, sy, math.cos(base + o) * speed,
+                           math.sin(base + o) * speed) for o in offsets]
+
+    def draw(self, surf, paddle):
+        r = self.rect
+        base = self.PHASE_COLORS[self.phase]
+        body = WHITE if (self.flash > 0 and self.flash % 2 == 0) else base
+        dark = (25, 12, 35)
+
+        pygame.draw.rect(surf, darken(body, 70), r.move(0, 5), border_radius=18)
+        pygame.draw.rect(surf, body, r, border_radius=18)
+        pygame.draw.rect(surf, lighten(body, 45),
+                         (r.x + 10, r.y + 6, r.w - 20, r.h // 5),
+                         border_radius=10)
+
+        # Mata mengikuti paddle
+        for k, sign in ((0.3, 1), (0.7, -1)):
+            ex, ey = int(r.x + r.w * k), r.y + r.h // 2 - 8
+            pygame.draw.circle(surf, WHITE, (ex, ey), 15)
+            dx, dy = paddle.x + paddle.w / 2 - ex, paddle.y - ey
+            d = math.hypot(dx, dy) or 1
+            pygame.draw.circle(surf, dark,
+                               (int(ex + dx / d * 6), int(ey + dy / d * 6)), 7)
+            pygame.draw.line(surf, dark, (ex - 18 * sign, ey - 22),
+                             (ex + 14 * sign, ey - 12), 4)
+
+        # Mulut bergigi
+        mx0, mx1, my = int(r.x + r.w * 0.32), int(r.x + r.w * 0.68), r.bottom - 22
+        pygame.draw.rect(surf, dark, (mx0, my, mx1 - mx0, 12), border_radius=4)
+        seg = (mx1 - mx0) / 6
+        for i in range(6):
+            x = mx0 + i * seg
+            pygame.draw.polygon(surf, WHITE, [(x, my), (x + seg, my),
+                                              (x + seg / 2, my + 8)])
+
+    def draw_bar(self, surf):
+        bw, bh = 300, 12
+        x, y = WIDTH // 2 - bw // 2, HUD_H + 14
+        pygame.draw.rect(surf, (30, 20, 40), (x, y, bw, bh), border_radius=6)
+        fill = int(bw * max(0, self.hp) / self.max_hp)
+        if fill > 0:
+            pygame.draw.rect(surf, self.PHASE_COLORS[self.phase],
+                             (x, y, fill, bh), border_radius=6)
+        pygame.draw.rect(surf, WHITE, (x, y, bw, bh), width=2, border_radius=6)
+        draw_text(surf, f"BOSS {self.number}", FONT_S, WHITE,
+                  (x - 45, y + bh // 2))
+
+
